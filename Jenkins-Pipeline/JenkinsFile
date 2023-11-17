@@ -1,0 +1,78 @@
+pipeline {
+    agent any
+       tools {
+        dotnet '3.1.400' //  .NET Core SDK version 3.1.400
+    }
+    stages {
+        stage('Example Stage') {
+            steps {
+                withCredentials([string(credentialsId: 'Jenkins_credential_ID_SP', variable: 'AZURE_SP_ID'),
+                                 string(credentialsId: 'Jenkins_credential_ID_Secret', variable: 'AZURE_SP_SECRET'),
+                                 string(credentialsId: 'Jenkins_credential_ID_Tenant', variable: 'AZURE_TENANT_ID'),
+                                 string(credentialsId: 'Jenkins_credential_ID_ACR', variable: 'ACR_USERNAME'),
+                                 password(credentialsId: 'Jenkins_credential_ID_Pass', variable: 'ACR_PASSWORD')]) {
+
+                    script {
+                        // Using variables securely
+                        echo "Azure Service Principal ID: ${AZURE_SP_ID}"
+                        echo "Azure Service Principal Secret: ${AZURE_SP_SECRET}"
+                        echo "Azure Tenant ID: ${AZURE_TENANT_ID}"
+                        echo "ACR Username: ${ACR_USERNAME}"
+                        echo "ACR Password: ${ACR_PASSWORD}"
+                    }
+                }
+            }
+        }
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([$class: 'GitSCM',
+                          branches: [[name: 'main']],
+                          userRemoteConfigs: [[url: 'https://github.com/mrajucha/Simple-dotnet-app.git']]]) 
+            }
+        }
+        stage('Build and Publish') {
+            steps {
+                script {
+                    // Build and publish the .NET Core application
+                    sh 'dotnet publish -c Release -o out'
+                }
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Build the Docker image
+                    sh 'docker build -t dotnet-demo-app .'
+                }
+            }
+        }
+        stage('Deploy to Azure Staging') {
+            steps {
+                script {
+                     // Login to Azure
+                    sh "az login --service-principal -u $AZURE_SP_ID -p $AZURE_SP_SECRET --tenant $AZURE_TENANT_ID"
+
+                    // Tag the Docker image with ACR details
+                    sh "docker tag dotnet-demo-app $ACR_SERVER/dotnet-demo-app:latest"
+
+                    // Login to Azure Container Registry
+                    sh "docker login $ACR_SERVER -u $ACR_USERNAME -p $ACR_PASSWORD"
+
+                    // Push the Docker image to Azure Container Registry
+                    sh "docker push $ACR_SERVER/dotnet-demo-app:latest"
+                }
+            }
+        }
+    }
+    post {
+        always {
+            junit '**/test-results/**/*.xml'
+        }
+        failure {
+            mail to: 'your-email@example.com', subject: 'The Pipeline failed :('
+        }
+    }
+}

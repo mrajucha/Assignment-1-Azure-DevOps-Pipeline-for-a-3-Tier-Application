@@ -1,0 +1,75 @@
+# azure-pipelines.yml
+
+trigger:
+- main
+
+pool:
+  vmImage: 'Ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+  appName: 'MyDotNetWebApp'       
+  resourceGroupName: 'webapp-rg' 
+  azureSubscription: 'Sandbox'  
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build Job'
+    steps:
+    - task: UseDotNet@2
+      inputs:
+        packageType: 'sdk'
+        version: '6.x'
+        
+
+    - script: dotnet restore
+      displayName: 'Restore Dependencies'
+
+    - script: dotnet build --configuration $(buildConfiguration) # for example staging/release
+      displayName: 'Build'
+
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: 'publish'
+        publishWebProjects: true
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        zipAfterPublish: true
+      displayName: 'Publish Artifacts'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        artifactName: 'dotNetWebApp.1.0'
+        publishLocation: 'Container'
+      displayName: 'Publish Artifacts'
+
+- stage: DeployAndTest
+  displayName: 'Deploy and Test Stage'
+  dependsOn: Build
+  jobs:
+  - job: DeployAndTestJob
+    displayName: 'Deploy and Test Job'
+    steps:
+    - download: current
+      artifact: 'dotNetWebApp.1.0'
+
+    - task: UseDotNet@2
+      inputs:
+        packageType: 'sdk'
+        version: '6.x'
+        
+
+    - script: |
+        # Azure CLI commands to deploy to Azure App Service
+        az login --service-principal -u $(servicePrincipalId) -p $(servicePrincipalKey) --tenant $(tenantId)
+        # The sensitive variables values can be paased as environment variable via azure cli
+        az webapp deploy --name $(MyDotNetWebApp) --resource-group $(webapp-rg) --src $(Pipeline.Workspace)/drop
+      displayName: 'Deploy to Staging'
+
+    - script: |
+        # Dotnet test command to run automated tests
+        dotnet test
+      displayName: 'Run Automated Tests'
